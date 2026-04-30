@@ -13,36 +13,26 @@ async fn main() {
     msg[..slice_msg.len()].copy_from_slice(slice_msg);
     writer
         .write(LogEntry {
-            ts: 123456789,
-            level: 1,
             len: slice_msg.len() as u16,
             msg,
         })
         .await
         .unwrap();
 
-    let entry = reader.read().await.unwrap();
-
-    println!(
-        "LogEntry {{ ts={}, level={}, len={}, msg={:?} }}",
-        entry.ts,
-        entry.level,
-        entry.len,
-        &entry.msg[..entry.len as usize]
-    );
+    println!("{}", reader.read().await.unwrap());
 
     let mut msg: [u8; 1024] = [0; 1024];
     let slice_msg = b"Hello?";
     msg[..slice_msg.len()].copy_from_slice(slice_msg);
     writer
         .write(LogEntry {
-            ts: 123456789,
-            level: 1,
             len: slice_msg.len() as u16,
             msg,
         })
         .await
         .unwrap();
+
+    //println!("{}", reader.read().await.unwrap());
 
     drop(logger);
 }

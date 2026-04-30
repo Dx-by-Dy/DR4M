@@ -1,16 +1,16 @@
 use crate::log_entry::LogEntryProtocol;
-use std::{collections::VecDeque, io, net::SocketAddr};
+use std::{collections::VecDeque, fmt::Display, io, net::SocketAddr};
 use tokio::{
     net::TcpListener,
     sync::{broadcast, mpsc, oneshot},
 };
 
-pub struct LogWriter<T: LogEntryProtocol<T>> {
+pub struct LogWriter<T: LogEntryProtocol<T> + Display> {
     socket: tokio::net::TcpStream,
     entry_type: std::marker::PhantomData<T>,
 }
 
-impl<T: LogEntryProtocol<T>> LogWriter<T> {
+impl<T: LogEntryProtocol<T> + Display> LogWriter<T> {
     pub async fn new(builder: Builder<T>) -> io::Result<Self> {
         let socket = tokio::net::TcpStream::connect(builder.writer_addr).await?;
         socket.set_nodelay(true).ok();
@@ -33,12 +33,12 @@ impl<T: LogEntryProtocol<T>> LogWriter<T> {
     }
 }
 
-pub struct LogReader<T: LogEntryProtocol<T>> {
+pub struct LogReader<T: LogEntryProtocol<T> + Display> {
     socket: tokio::net::TcpStream,
     entry_type: std::marker::PhantomData<T>,
 }
 
-impl<T: LogEntryProtocol<T>> LogReader<T> {
+impl<T: LogEntryProtocol<T> + Display> LogReader<T> {
     pub async fn new(builder: Builder<T>) -> io::Result<Self> {
         let socket = tokio::net::TcpStream::connect(builder.reader_addr).await?;
         socket.set_nodelay(true).ok();
@@ -61,7 +61,7 @@ impl<T: LogEntryProtocol<T>> LogReader<T> {
     }
 }
 
-pub struct Logger<T: LogEntryProtocol<T>> {
+pub struct Logger<T: LogEntryProtocol<T> + Display> {
     buffer_handler: tokio::task::JoinHandle<()>,
     writer_handler: tokio::task::JoinHandle<()>,
     reader_handler: tokio::task::JoinHandle<()>,
@@ -69,7 +69,7 @@ pub struct Logger<T: LogEntryProtocol<T>> {
     entry_type: std::marker::PhantomData<T>,
 }
 
-impl<T: LogEntryProtocol<T>> Logger<T> {
+impl<T: LogEntryProtocol<T> + Display> Logger<T> {
     fn new(builder: Builder<T>) -> Self {
         let (mpsc_sender, mpsc_reciever) = mpsc::channel::<T>(builder.channel_capacity);
         let (tx_snapshot, rx_snapshot) = mpsc::channel::<oneshot::Sender<Vec<T>>>(1024);
@@ -90,7 +90,7 @@ impl<T: LogEntryProtocol<T>> Logger<T> {
     }
 }
 
-fn spawn_buffer_task<T: LogEntryProtocol<T>>(
+fn spawn_buffer_task<T: LogEntryProtocol<T> + Display>(
     mut mpsc_reciever: mpsc::Receiver<T>,
     mut rx_snapshot: mpsc::Receiver<oneshot::Sender<Vec<T>>>,
     buffer_tx_broadcast: broadcast::Sender<T>,
@@ -119,20 +119,26 @@ fn spawn_buffer_task<T: LogEntryProtocol<T>>(
     })
 }
 
-fn spawn_writer_task<T: LogEntryProtocol<T>>(
+fn spawn_writer_task<T: LogEntryProtocol<T> + Display>(
     mpsc_sender: mpsc::Sender<T>,
     builder: Builder<T>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let writer_listener = match TcpListener::bind(builder.writer_addr).await {
             Ok(listener) => listener,
-            Err(_) => unimplemented!(),
+            Err(e) => {
+                eprintln!("Failed starting writer listener: {}", e);
+                return;
+            }
         };
 
         loop {
             let (mut socket, _addr) = match writer_listener.accept().await {
                 Ok((socket, _addr)) => (socket, _addr),
-                Err(_) => unimplemented!(),
+                Err(e) => {
+                    eprintln!("Failed accepting writer connection: {}", e);
+                    continue;
+                }
             };
             let mpsc_sender = mpsc_sender.clone();
 
@@ -140,12 +146,22 @@ fn spawn_writer_task<T: LogEntryProtocol<T>>(
                 loop {
                     let entry = match T::read_from(&mut socket).await {
                         Ok(entry) => entry,
-                        Err(_) => unimplemented!(),
+                        Err(e) => {
+                            eprintln!("Failed reading entry from writer: {}", e);
+                            return;
+                        }
                     };
 
                     match mpsc_sender.try_send(entry) {
                         Ok(_) => {}
-                        Err(_) => unimplemented!(),
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            eprintln!("Failed sending entry to buffer: full");
+                            continue;
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            eprintln!("Failed sending entry to buffer: closed");
+                            return;
+                        }
                     }
                 }
             });
@@ -153,7 +169,7 @@ fn spawn_writer_task<T: LogEntryProtocol<T>>(
     })
 }
 
-fn spawn_reader_task<T: LogEntryProtocol<T>>(
+fn spawn_reader_task<T: LogEntryProtocol<T> + Display>(
     tx_broadcast: broadcast::Sender<T>,
     tx_snapshot: mpsc::Sender<oneshot::Sender<Vec<T>>>,
     builder: Builder<T>,
@@ -161,13 +177,19 @@ fn spawn_reader_task<T: LogEntryProtocol<T>>(
     tokio::spawn(async move {
         let reader_listener = match TcpListener::bind(builder.reader_addr).await {
             Ok(listener) => listener,
-            Err(_) => unimplemented!(),
+            Err(e) => {
+                eprintln!("Failed starting reader listener: {}", e);
+                return;
+            }
         };
 
         loop {
             let (mut socket, _addr) = match reader_listener.accept().await {
                 Ok((socket, _addr)) => (socket, _addr),
-                Err(_) => unimplemented!(),
+                Err(e) => {
+                    eprintln!("Failed accepting reader connection: {}", e);
+                    continue;
+                }
             };
             socket.set_nodelay(true).ok();
 
@@ -176,19 +198,28 @@ fn spawn_reader_task<T: LogEntryProtocol<T>>(
             let (snapshot_tx, snapshot_rx) = oneshot::channel();
             match tx_snapshot.send(snapshot_tx).await {
                 Ok(_) => {}
-                Err(_) => unimplemented!(),
+                Err(e) => {
+                    eprintln!("Failed sending snapshot: {}", e);
+                    continue;
+                }
             }
 
             tokio::spawn(async move {
                 let snapshot = match snapshot_rx.await {
                     Ok(snapshot) => snapshot,
-                    Err(_) => unimplemented!(),
+                    Err(e) => {
+                        eprintln!("Failed receiving snapshot: {}", e);
+                        return;
+                    }
                 };
 
                 for entry in snapshot {
                     match entry.write_to(&mut socket).await {
                         Ok(_) => {}
-                        Err(_) => unimplemented!(),
+                        Err(e) => {
+                            eprintln!("Failed writing entry [{}]: {}", entry, e);
+                            continue;
+                        }
                     };
                 }
 
@@ -197,11 +228,22 @@ fn spawn_reader_task<T: LogEntryProtocol<T>>(
                         Ok(entry) => {
                             match entry.write_to(&mut socket).await {
                                 Ok(_) => {}
-                                Err(_) => unimplemented!(),
+                                Err(e) => {
+                                    eprintln!("Failed writing entry [{}]: {}", entry, e);
+                                    continue;
+                                }
                             };
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {}
-                        Err(_) => unimplemented!(),
+                        Err(e) => match e {
+                            broadcast::error::RecvError::Lagged(_) => {
+                                eprintln!("Failed receiving broadcast entry: {}", e);
+                                continue;
+                            }
+                            broadcast::error::RecvError::Closed => {
+                                eprintln!("Broadcast channel closed");
+                                return;
+                            }
+                        },
                     }
                 }
             });
@@ -209,7 +251,7 @@ fn spawn_reader_task<T: LogEntryProtocol<T>>(
     })
 }
 
-impl<T: LogEntryProtocol<T>> Drop for Logger<T> {
+impl<T: LogEntryProtocol<T> + Display> Drop for Logger<T> {
     fn drop(&mut self) {
         self.reader_handler.abort();
         self.writer_handler.abort();
@@ -218,7 +260,7 @@ impl<T: LogEntryProtocol<T>> Drop for Logger<T> {
 }
 
 #[derive(Clone, Copy)]
-pub struct Builder<T: LogEntryProtocol<T>> {
+pub struct Builder<T: LogEntryProtocol<T> + Display> {
     writer_addr: SocketAddr,
     reader_addr: SocketAddr,
     buffer_capacity: usize,
@@ -228,7 +270,7 @@ pub struct Builder<T: LogEntryProtocol<T>> {
     entry_type: std::marker::PhantomData<T>,
 }
 
-impl<T: LogEntryProtocol<T>> Builder<T> {
+impl<T: LogEntryProtocol<T> + Display> Builder<T> {
     pub fn new() -> Self {
         Self {
             writer_addr: SocketAddr::from(([127, 0, 0, 1], 5555)),

@@ -1,14 +1,14 @@
+use std::fmt::Display;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Debug, Clone, Copy)]
 pub struct LogEntry {
-    pub ts: u64,
-    pub level: u8,
     pub len: u16,
     pub msg: [u8; 1024],
 }
 
-pub trait LogEntryProtocol<T>: Clone + Copy + Send + 'static {
+pub trait LogEntryProtocol<T: Display>: Clone + Copy + Send + 'static {
     fn write_to(
         self,
         socket: &mut tokio::net::TcpStream,
@@ -24,12 +24,10 @@ impl LogEntryProtocol<LogEntry> for LogEntry {
         socket: &mut tokio::net::TcpStream,
     ) -> impl Future<Output = Result<(), std::io::Error>> + Send {
         async move {
-            let mut buf = [0u8; 1035];
-            buf[..8].copy_from_slice(&self.ts.to_be_bytes());
-            buf[8] = self.level;
-            buf[9..11].copy_from_slice(&self.len.to_be_bytes());
-            buf[11..11 + self.len as usize].copy_from_slice(&self.msg[..self.len as usize]);
-            socket.write_all(&buf[..11 + self.len as usize]).await?;
+            let mut buf = [0u8; 1026];
+            buf[..2].copy_from_slice(&self.len.to_be_bytes());
+            buf[2..2 + self.len as usize].copy_from_slice(&self.msg[..self.len as usize]);
+            socket.write_all(&buf[..2 + self.len as usize]).await?;
             socket.flush().await
         }
     }
@@ -38,17 +36,26 @@ impl LogEntryProtocol<LogEntry> for LogEntry {
         socket: &mut tokio::net::TcpStream,
     ) -> impl Future<Output = tokio::io::Result<LogEntry>> + Send {
         async move {
-            let ts = socket.read_u64().await?;
-            let level = socket.read_u8().await?;
             let len = socket.read_u16().await?;
             let mut msg = [0u8; 1024];
-            socket.read_exact(&mut msg[..len as usize]).await?;
-            Ok(LogEntry {
-                ts,
-                level,
-                len,
-                msg,
-            })
+            let readed_len = socket.read_exact(&mut msg[..len as usize]).await?;
+            if readed_len != len as usize {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Failed reading log entry",
+                ));
+            }
+            Ok(LogEntry { len, msg })
         }
+    }
+}
+
+impl Display for LogEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            String::from_utf8_lossy(&self.msg[..self.len as usize])
+        )
     }
 }
