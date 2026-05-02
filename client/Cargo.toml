@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 common = {path = "../common"}
+logger = {path = "../logger"}
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.21"
 futures = "0.3"

@@ -59,3 +59,15 @@ impl Display for LogEntry {
         )
     }
 }
+
+impl From<&[u8]> for LogEntry {
+    fn from(s: &[u8]) -> Self {
+        let mut msg = [0u8; 1024];
+        let len = s.len().min(1024);
+        msg[..len].copy_from_slice(&s[..len]);
+        LogEntry {
+            len: len as u16,
+            msg,
+        }
+    }
+}

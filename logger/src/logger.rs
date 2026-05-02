@@ -1,12 +1,12 @@
 use crate::log_entry::LogEntryProtocol;
-use std::{collections::VecDeque, fmt::Display, io, net::SocketAddr};
+use std::{cell::Cell, collections::VecDeque, fmt::Display, io, net::SocketAddr, sync::Arc};
 use tokio::{
     net::TcpListener,
-    sync::{broadcast, mpsc, oneshot},
+    sync::{Mutex, broadcast, mpsc, oneshot},
 };
 
 pub struct LogWriter<T: LogEntryProtocol<T> + Display> {
-    socket: tokio::net::TcpStream,
+    socket: Arc<Mutex<Cell<Option<tokio::net::TcpStream>>>>,
     entry_type: std::marker::PhantomData<T>,
 }
 
@@ -15,26 +15,29 @@ impl<T: LogEntryProtocol<T> + Display> LogWriter<T> {
         let socket = tokio::net::TcpStream::connect(builder.writer_addr).await?;
         socket.set_nodelay(true).ok();
         Ok(Self {
-            socket,
+            socket: Arc::new(Mutex::new(Cell::new(Some(socket)))),
             entry_type: std::marker::PhantomData,
         })
     }
 
-    pub async fn write(&mut self, entry: T) -> io::Result<()> {
-        entry.write_to(&mut self.socket).await
+    pub async fn write(&self, entry: T) -> io::Result<()> {
+        let mg = self.socket.lock().await;
+        let mut socket = mg.take().unwrap();
+        let result = entry.write_to(&mut socket).await;
+        mg.set(Some(socket));
+        result
     }
 
-    pub async fn try_clone(&self) -> io::Result<Self> {
-        let socket = tokio::net::TcpStream::connect(self.socket.peer_addr()?).await?;
-        Ok(Self {
-            socket,
+    pub fn clone(&self) -> Self {
+        Self {
+            socket: self.socket.clone(),
             entry_type: std::marker::PhantomData,
-        })
+        }
     }
 }
 
 pub struct LogReader<T: LogEntryProtocol<T> + Display> {
-    socket: tokio::net::TcpStream,
+    socket: Arc<Mutex<Cell<Option<tokio::net::TcpStream>>>>,
     entry_type: std::marker::PhantomData<T>,
 }
 
@@ -43,21 +46,24 @@ impl<T: LogEntryProtocol<T> + Display> LogReader<T> {
         let socket = tokio::net::TcpStream::connect(builder.reader_addr).await?;
         socket.set_nodelay(true).ok();
         Ok(Self {
-            socket,
+            socket: Arc::new(Mutex::new(Cell::new(Some(socket)))),
             entry_type: std::marker::PhantomData,
         })
     }
 
-    pub async fn read(&mut self) -> io::Result<T> {
-        T::read_from(&mut self.socket).await
+    pub async fn read(&self) -> io::Result<T> {
+        let mg = self.socket.lock().await;
+        let mut socket = mg.take().unwrap();
+        let result = T::read_from(&mut socket).await;
+        mg.set(Some(socket));
+        result
     }
 
-    pub async fn try_clone(&self) -> io::Result<Self> {
-        let socket = tokio::net::TcpStream::connect(self.socket.peer_addr()?).await?;
-        Ok(Self {
-            socket,
+    pub fn clone(&self) -> Self {
+        Self {
+            socket: self.socket.clone(),
             entry_type: std::marker::PhantomData,
-        })
+        }
     }
 }
 
@@ -276,8 +282,8 @@ impl<T: LogEntryProtocol<T> + Display> Builder<T> {
             writer_addr: SocketAddr::from(([127, 0, 0, 1], 5555)),
             reader_addr: SocketAddr::from(([127, 0, 0, 1], 5556)),
             buffer_capacity: 10_000,
-            channel_capacity: 100_000,
-            broadcast_capacity: 10_000,
+            channel_capacity: 10_000,
+            broadcast_capacity: 15_000,
             entry_type: std::marker::PhantomData,
         }
     }

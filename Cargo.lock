@@ -421,6 +421,7 @@ dependencies = [
  "common",
  "crossterm",
  "futures",
+ "logger",
  "ratatui",
  "tokio",
  "tokio-tungstenite 0.21.0",
