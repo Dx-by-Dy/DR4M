@@ -28,7 +28,9 @@ macro_rules! LOGGER_INIT {
 #[macro_export]
 macro_rules! async_log_quiet {
     ($value:expr) => {
-        _ = crate::LOGGER_WRITER.write($value).await;
+        async {
+            _ = crate::LOGGER_WRITER.write($value).await;
+        }
     };
 }
 
@@ -42,7 +44,7 @@ macro_rules! sync_log_quiet {
 #[macro_export]
 macro_rules! async_log {
     ($value:expr) => {
-        crate::LOGGER_WRITER.write($value).await
+        crate::LOGGER_WRITER.write($value)
     };
 }
 
@@ -50,5 +52,19 @@ macro_rules! async_log {
 macro_rules! sync_log {
     ($value:expr) => {
         crate::SYNC_LOG_RUNTIME.block_on(crate::LOGGER_WRITER.write($value))
+    };
+}
+
+#[macro_export]
+macro_rules! async_read_log {
+    () => {
+        crate::LOGGER_READER.read()
+    };
+}
+
+#[macro_export]
+macro_rules! sync_read_log {
+    () => {
+        crate::SYNC_LOG_RUNTIME.block_on(crate::LOGGER_READER.read())
     };
 }

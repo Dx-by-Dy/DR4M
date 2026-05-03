@@ -1,5 +1,9 @@
 pub mod app_backend;
-pub mod ui;
+pub mod ui_manager;
+pub mod chat_manager;
+pub mod event_manager;
+pub mod control_manager;
+pub mod logger_manager;
 
 pub type Tx = futures::stream::SplitSink<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
