@@ -1,102 +1,11 @@
-use crate::log_entry::LogEntryProtocol;
-use std::{cell::Cell, collections::VecDeque, fmt::Display, io, net::SocketAddr, sync::Arc};
+use crate::{builder::Builder, log_entry::log_entry_protocol::LogEntryProtocol};
+use std::{collections::VecDeque, fmt::Display};
 use tokio::{
     net::TcpListener,
-    sync::{Mutex, broadcast, mpsc, oneshot},
+    sync::{broadcast, mpsc, oneshot},
 };
 
-pub struct LogWriter<T: LogEntryProtocol<T> + Display> {
-    socket: Arc<Mutex<Cell<Option<tokio::net::TcpStream>>>>,
-    entry_type: std::marker::PhantomData<T>,
-}
-
-impl<T: LogEntryProtocol<T> + Display> LogWriter<T> {
-    pub async fn new(builder: Builder<T>) -> io::Result<Self> {
-        let socket = tokio::net::TcpStream::connect(builder.writer_addr).await?;
-        socket.set_nodelay(true).ok();
-        Ok(Self {
-            socket: Arc::new(Mutex::new(Cell::new(Some(socket)))),
-            entry_type: std::marker::PhantomData,
-        })
-    }
-
-    pub async fn write(&self, entry: T) -> io::Result<()> {
-        let mg = self.socket.lock().await;
-        let mut socket = mg.take().unwrap();
-        let result = entry.write_to(&mut socket).await;
-        mg.set(Some(socket));
-        result
-    }
-
-    pub fn clone(&self) -> Self {
-        Self {
-            socket: self.socket.clone(),
-            entry_type: std::marker::PhantomData,
-        }
-    }
-}
-
-pub struct LogReader<T: LogEntryProtocol<T> + Display> {
-    socket: Arc<Mutex<Cell<Option<tokio::net::TcpStream>>>>,
-    entry_type: std::marker::PhantomData<T>,
-}
-
-impl<T: LogEntryProtocol<T> + Display> LogReader<T> {
-    pub async fn new(builder: Builder<T>) -> io::Result<Self> {
-        let socket = tokio::net::TcpStream::connect(builder.reader_addr).await?;
-        socket.set_nodelay(true).ok();
-        Ok(Self {
-            socket: Arc::new(Mutex::new(Cell::new(Some(socket)))),
-            entry_type: std::marker::PhantomData,
-        })
-    }
-
-    pub async fn read(&self) -> io::Result<T> {
-        let mg = self.socket.lock().await;
-        let mut socket = mg.take().unwrap();
-        let result = T::read_from(&mut socket).await;
-        mg.set(Some(socket));
-        result
-    }
-
-    pub fn clone(&self) -> Self {
-        Self {
-            socket: self.socket.clone(),
-            entry_type: std::marker::PhantomData,
-        }
-    }
-}
-
-pub struct Logger<T: LogEntryProtocol<T> + Display> {
-    buffer_handler: tokio::task::JoinHandle<()>,
-    writer_handler: tokio::task::JoinHandle<()>,
-    reader_handler: tokio::task::JoinHandle<()>,
-
-    entry_type: std::marker::PhantomData<T>,
-}
-
-impl<T: LogEntryProtocol<T> + Display> Logger<T> {
-    fn new(builder: Builder<T>) -> Self {
-        let (mpsc_sender, mpsc_reciever) = mpsc::channel::<T>(builder.channel_capacity);
-        let (tx_snapshot, rx_snapshot) = mpsc::channel::<oneshot::Sender<Vec<T>>>(1024);
-        let (tx_broadcast, _) = broadcast::channel::<T>(builder.broadcast_capacity);
-        let buffer_tx_broadcast = tx_broadcast.clone();
-
-        let buffer_handler =
-            spawn_buffer_task(mpsc_reciever, rx_snapshot, buffer_tx_broadcast, builder);
-        let writer_handler = spawn_writer_task(mpsc_sender, builder);
-        let reader_handler = spawn_reader_task(tx_broadcast, tx_snapshot, builder);
-
-        Logger {
-            buffer_handler,
-            writer_handler,
-            reader_handler,
-            entry_type: std::marker::PhantomData,
-        }
-    }
-}
-
-fn spawn_buffer_task<T: LogEntryProtocol<T> + Display>(
+pub fn spawn_buffer_task<T: LogEntryProtocol<T> + Display>(
     mut mpsc_reciever: mpsc::Receiver<T>,
     mut rx_snapshot: mpsc::Receiver<oneshot::Sender<Vec<T>>>,
     buffer_tx_broadcast: broadcast::Sender<T>,
@@ -125,7 +34,7 @@ fn spawn_buffer_task<T: LogEntryProtocol<T> + Display>(
     })
 }
 
-fn spawn_writer_task<T: LogEntryProtocol<T> + Display>(
+pub fn spawn_writer_task<T: LogEntryProtocol<T> + Display>(
     mpsc_sender: mpsc::Sender<T>,
     builder: Builder<T>,
 ) -> tokio::task::JoinHandle<()> {
@@ -175,7 +84,7 @@ fn spawn_writer_task<T: LogEntryProtocol<T> + Display>(
     })
 }
 
-fn spawn_reader_task<T: LogEntryProtocol<T> + Display>(
+pub fn spawn_reader_task<T: LogEntryProtocol<T> + Display>(
     tx_broadcast: broadcast::Sender<T>,
     tx_snapshot: mpsc::Sender<oneshot::Sender<Vec<T>>>,
     builder: Builder<T>,
@@ -255,73 +164,4 @@ fn spawn_reader_task<T: LogEntryProtocol<T> + Display>(
             });
         }
     })
-}
-
-impl<T: LogEntryProtocol<T> + Display> Drop for Logger<T> {
-    fn drop(&mut self) {
-        self.reader_handler.abort();
-        self.writer_handler.abort();
-        self.buffer_handler.abort();
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct Builder<T: LogEntryProtocol<T> + Display> {
-    writer_addr: SocketAddr,
-    reader_addr: SocketAddr,
-    buffer_capacity: usize,
-    channel_capacity: usize,
-    broadcast_capacity: usize,
-
-    entry_type: std::marker::PhantomData<T>,
-}
-
-impl<T: LogEntryProtocol<T> + Display> Builder<T> {
-    pub fn new() -> Self {
-        Self {
-            writer_addr: SocketAddr::from(([127, 0, 0, 1], 5555)),
-            reader_addr: SocketAddr::from(([127, 0, 0, 1], 5556)),
-            buffer_capacity: 10_000,
-            channel_capacity: 10_000,
-            broadcast_capacity: 15_000,
-            entry_type: std::marker::PhantomData,
-        }
-    }
-
-    pub fn writer_addr(mut self, addr: SocketAddr) -> Self {
-        self.writer_addr = addr;
-        self
-    }
-
-    pub fn reader_addr(mut self, addr: SocketAddr) -> Self {
-        self.reader_addr = addr;
-        self
-    }
-
-    pub fn buffer_capacity(mut self, capacity: usize) -> Self {
-        self.buffer_capacity = capacity;
-        self
-    }
-
-    pub fn channel_capacity(mut self, capacity: usize) -> Self {
-        self.channel_capacity = capacity;
-        self
-    }
-
-    pub fn broadcast_capacity(mut self, capacity: usize) -> Self {
-        self.broadcast_capacity = capacity;
-        self
-    }
-
-    pub fn logger(self) -> Logger<T> {
-        Logger::new(self)
-    }
-
-    pub fn writer(self) -> impl Future<Output = io::Result<LogWriter<T>>> + Send {
-        LogWriter::new(self)
-    }
-
-    pub fn reader(self) -> impl Future<Output = io::Result<LogReader<T>>> + Send {
-        LogReader::new(self)
-    }
 }

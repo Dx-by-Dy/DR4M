@@ -1,9 +1,9 @@
-pub mod app_backend;
-pub mod chat_manager;
+//pub mod app_backend;
+//pub mod chat_manager;
 pub mod connection;
 pub mod controller;
 pub mod inputter;
-pub mod logger_manager;
+pub mod log_reader;
 pub mod ui;
 
 pub type Tx = futures::stream::SplitSink<
@@ -12,6 +12,6 @@ pub type Tx = futures::stream::SplitSink<
 >;
 
 logger::LOGGER_INIT!(
-    logger::logger::Builder::<logger::log_entry::LogEntry>::new(),
+    logger::builder::Builder::<logger::log_entry::LogEntry>::new(),
     logger::log_entry::LogEntry
 );

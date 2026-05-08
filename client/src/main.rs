@@ -1,6 +1,3 @@
-use crossterm::event;
-use tokio::sync::mpsc;
-
 #[tokio::main]
 async fn main() {
     // let (tx, rx) = mpsc::channel(1024);

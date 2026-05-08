@@ -1,4 +1,4 @@
-use logger::{log_entry::LogEntry, logger::Builder};
+use logger::{builder::Builder, log_entry::LogEntry};
 
 #[tokio::main]
 async fn main() {

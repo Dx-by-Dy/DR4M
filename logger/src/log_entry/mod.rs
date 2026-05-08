@@ -1,3 +1,6 @@
+pub mod log_entry_protocol;
+
+use crate::log_entry::log_entry_protocol::LogEntryProtocol;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[repr(C)]
@@ -5,16 +8,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub struct LogEntry {
     pub len: u16,
     pub msg: [u8; 1024],
-}
-
-pub trait LogEntryProtocol<T: std::fmt::Display>: Clone + Copy + Send + 'static {
-    fn write_to(
-        self,
-        socket: &mut tokio::net::TcpStream,
-    ) -> impl Future<Output = Result<(), std::io::Error>> + Send;
-    fn read_from(
-        socket: &mut tokio::net::TcpStream,
-    ) -> impl Future<Output = tokio::io::Result<T>> + Send;
 }
 
 impl LogEntryProtocol<LogEntry> for LogEntry {

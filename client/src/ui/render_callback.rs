@@ -1,28 +1,41 @@
 use futures::future::ready;
-use ratatui::Frame;
+
+use crate::{
+    connection::{Connected, ConnectionEvent},
+    ui::render_state::RenderState,
+};
 
 pub enum RenderCallback {
-    Render(Box<dyn FnOnce(&mut Frame<'_>) + Send + 'static>),
-    Redraw,
+    RenderState(RenderState),
 }
 
 impl RenderCallback {
-    pub async fn release<T: RenderCallbackBehaviour>(self, unit: &mut T) {
+    pub async fn release<T: RenderBehaviour>(self, unit: &mut T) {
         match self {
-            RenderCallback::Render(render_callback) => unit.render(render_callback).await,
-            RenderCallback::Redraw => unit.redraw().await,
+            RenderCallback::RenderState(render_state) => {
+                unit.handle_render_state(render_state).await
+            }
         }
     }
 }
 
-pub trait RenderCallbackBehaviour {
-    fn render(
-        &mut self,
-        _render_callback: Box<dyn FnOnce(&mut Frame<'_>) + Send + 'static>,
-    ) -> impl Future<Output = ()> {
+pub trait RenderBehaviour {
+    fn get_render_callback(&mut self) -> impl Future<Output = RenderCallback> {
+        ready(RenderCallback::RenderState(RenderState::default()))
+    }
+
+    fn handle_render_state(&mut self, _render_state: RenderState) -> impl Future<Output = ()> {
         ready(())
     }
-    fn redraw(&mut self) -> impl Future<Output = ()> {
-        ready(())
+
+    fn send_render_callback(&mut self, render_callback: RenderCallback) -> impl Future<Output = ()>
+    where
+        Self: Connected,
+    {
+        async {
+            self.connection()
+                .send(ConnectionEvent::RenderCallback(render_callback))
+                .await;
+        }
     }
 }

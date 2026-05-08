@@ -1,9 +1,9 @@
 use crate::{
     controller::control_event::{ControlEvent, ControlEventHook},
     inputter::input_event::{InputEvent, InputEventBehaviour},
-    ui::render_callback::{RenderCallback, RenderCallbackBehaviour},
+    ui::render_callback::{RenderBehaviour, RenderCallback},
 };
-use logger::{async_log_quiet, log_entry::LogEntry};
+use logger::{async_log, log_entry::LogEntry};
 use tokio::{
     select,
     sync::{mpsc, oneshot},
@@ -96,25 +96,39 @@ impl Connection {
         }
     }
 
-    pub async fn render_try_send(
-        &mut self,
-        render: RenderCallback,
-    ) -> Result<bool, mpsc::error::SendError<RenderCallback>> {
-        if let Some(sender) = self.render_sender.as_mut() {
-            sender.send(render).await.map(|_| true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    pub async fn key_event_try_send(
-        &mut self,
-        event: InputEvent,
-    ) -> Result<bool, mpsc::error::SendError<InputEvent>> {
-        if let Some(sender) = self.input_event_sender.as_mut() {
-            sender.send(event).await.map(|_| true)
-        } else {
-            Ok(false)
+    pub async fn send(&mut self, event: ConnectionEvent) -> bool {
+        match event {
+            ConnectionEvent::InputEvent(input_event) => {
+                if let Some(sender) = self.input_event_sender.as_mut() {
+                    match sender.send(input_event).await {
+                        Ok(_) => true,
+                        Err(e) => {
+                            async_log!(LogEntry::from(
+                                format!("Connection send input event error: {:?}", e).as_bytes()
+                            ));
+                            false
+                        }
+                    }
+                } else {
+                    false
+                }
+            }
+            ConnectionEvent::ControlEvent(_control_event) => false,
+            ConnectionEvent::RenderCallback(render_callback) => {
+                if let Some(sender) = self.render_sender.as_mut() {
+                    match sender.send(render_callback).await {
+                        Ok(_) => true,
+                        Err(_) => {
+                            async_log!(LogEntry::from(
+                                format!("Connection send render error").as_bytes()
+                            ));
+                            false
+                        }
+                    }
+                } else {
+                    false
+                }
+            }
         }
     }
 }
@@ -125,10 +139,9 @@ impl Connection {
         bridge: oneshot::Sender<mpsc::Sender<RenderCallback>>,
     ) {
         if let Err(e) = bridge.send(self.render_sender.take().unwrap()) {
-            async_log_quiet!(LogEntry::from(
+            async_log!(LogEntry::from(
                 format!("Connection send error: {:?}", e).as_bytes()
-            ))
-            .await;
+            ));
         }
     }
 
@@ -141,10 +154,9 @@ impl Connection {
                 self.render_sender = Some(channel);
             }
             Err(e) => {
-                async_log_quiet!(LogEntry::from(
+                async_log!(LogEntry::from(
                     format!("Connection recv error: {:?}", e).as_bytes()
-                ))
-                .await;
+                ));
             }
         }
     }
@@ -154,10 +166,9 @@ impl Connection {
         bridge: oneshot::Sender<mpsc::Receiver<InputEvent>>,
     ) {
         if let Err(e) = bridge.send(self.input_event_receiver.take().unwrap()) {
-            async_log_quiet!(LogEntry::from(
+            async_log!(LogEntry::from(
                 format!("Connection send error: {:?}", e).as_bytes()
-            ))
-            .await;
+            ));
         }
     }
 
@@ -170,10 +181,9 @@ impl Connection {
                 self.input_event_receiver = Some(channel);
             }
             Err(e) => {
-                async_log_quiet!(LogEntry::from(
+                async_log!(LogEntry::from(
                     format!("Connection recv error: {:?}", e).as_bytes()
-                ))
-                .await;
+                ));
             }
         }
     }
@@ -184,7 +194,7 @@ pub trait Connected {
 }
 
 pub trait ConnectionBehaviour:
-    ControlEventHook + InputEventBehaviour + RenderCallbackBehaviour + Connected
+    ControlEventHook + InputEventBehaviour + RenderBehaviour + Connected
 {
     fn release(&mut self, event: ConnectionEvent) -> impl Future<Output = ()> {
         async {
