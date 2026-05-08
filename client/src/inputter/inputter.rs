@@ -1,27 +1,17 @@
-use crossterm::event::{self, Event, KeyEvent};
+use crate::inputter::input_event::InputEvent;
+use crossterm::event::{self, Event};
 use logger::{log_entry::LogEntry, sync_log_quiet};
 use std::thread;
 use tokio::sync::mpsc;
 
-pub enum EventControl {
-    SwapRenderTop,
-    SwapRenderBottom,
-    SwapEvent,
+pub struct Inputter {
+    input_event_channel: mpsc::Sender<InputEvent>,
 }
 
-pub struct EventManager {
-    event_channel: mpsc::Sender<KeyEvent>,
-    event_control_channel: mpsc::Sender<EventControl>,
-}
-
-impl EventManager {
-    pub fn new(
-        event_channel: mpsc::Sender<KeyEvent>,
-        event_control_channel: mpsc::Sender<EventControl>,
-    ) -> Self {
+impl Inputter {
+    pub fn new(input_event_channel: mpsc::Sender<InputEvent>) -> Self {
         Self {
-            event_channel,
-            event_control_channel,
+            input_event_channel,
         }
     }
 
@@ -55,13 +45,20 @@ impl EventManager {
     pub fn send_event(&self, event: Event) {
         match event {
             Event::Key(key_event) => {
-                if let Err(e) = self.event_channel.try_send(key_event) {
+                if let Err(e) = self
+                    .input_event_channel
+                    .try_send(InputEvent::KeyEvent(key_event))
+                {
                     sync_log_quiet!(LogEntry::from(
                         format!("UserManager send error: {:?}", e).as_bytes()
                     ));
                 }
             }
-            _ => {}
+            Event::FocusGained => todo!(),
+            Event::FocusLost => todo!(),
+            Event::Mouse(_) => todo!(),
+            Event::Paste(_) => todo!(),
+            Event::Resize(_, _) => todo!(),
         }
     }
 }

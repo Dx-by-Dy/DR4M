@@ -1,14 +1,13 @@
-use std::fmt::Display;
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct LogEntry {
     pub len: u16,
     pub msg: [u8; 1024],
 }
 
-pub trait LogEntryProtocol<T: Display>: Clone + Copy + Send + 'static {
+pub trait LogEntryProtocol<T: std::fmt::Display>: Clone + Copy + Send + 'static {
     fn write_to(
         self,
         socket: &mut tokio::net::TcpStream,
@@ -50,7 +49,7 @@ impl LogEntryProtocol<LogEntry> for LogEntry {
     }
 }
 
-impl Display for LogEntry {
+impl std::fmt::Display for LogEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,

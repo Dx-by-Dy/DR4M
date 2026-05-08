@@ -1,14 +1,13 @@
 use crossterm::event;
-use dr4m_client::{event_manager::EventManager, ui_manager::UIManager};
 use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() {
-    let (tx, rx) = mpsc::channel(1024);
-    let ui = UIManager::new(rx).unwrap();
-    let (event_tx, event_rx) = mpsc::channel(1024);
-    let (event_control_tx, event_control_rx) = mpsc::channel(1024);
-    let event_manager = EventManager::new(event_tx, event_control_tx);
+    // let (tx, rx) = mpsc::channel(1024);
+    // let ui = UIManager::new(rx).unwrap();
+    // let (event_tx, event_rx) = mpsc::channel(1024);
+    // let (event_control_tx, event_control_rx) = mpsc::channel(1024);
+    // let event_manager = EventManager::new(event_tx, event_control_tx);
 
     //let app_backend = app_backend::AppBackend::new();
 
@@ -66,5 +65,5 @@ async fn main() {
     //     }
     // }
 
-    drop(ui);
+    // drop(ui);
 }
