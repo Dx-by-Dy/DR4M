@@ -1,5 +1,8 @@
 use crate::{
-    controller::control_event::{ControlEvent, ControlEventHook},
+    controller::{
+        component::Quit,
+        control_event::{ControlEvent, ControlEventHook},
+    },
     inputter::input_event::{InputEvent, InputEventBehaviour},
     ui::render_callback::{RenderBehaviour, RenderCallback},
 };
@@ -20,34 +23,53 @@ pub struct Connection {
     render_receiver: Option<mpsc::Receiver<RenderCallback>>,
     input_event_sender: Option<mpsc::Sender<InputEvent>>,
     input_event_receiver: Option<mpsc::Receiver<InputEvent>>,
-    control_receiver: mpsc::Receiver<ControlEvent>,
+    control_sender: Option<mpsc::Sender<ControlEvent>>,
+    control_receiver: Option<mpsc::Receiver<ControlEvent>>,
 }
 
 impl Connection {
-    pub fn new(control_receiver: mpsc::Receiver<ControlEvent>) -> Self {
+    pub fn new() -> Self {
         Self {
             render_sender: None,
             render_receiver: None,
             input_event_sender: None,
             input_event_receiver: None,
-            control_receiver,
+            control_sender: None,
+            control_receiver: None,
         }
     }
 
-    pub fn set_render_sender(&mut self, render_sender: mpsc::Sender<RenderCallback>) {
+    pub fn set_render_sender(mut self, render_sender: mpsc::Sender<RenderCallback>) -> Self {
         self.render_sender = Some(render_sender);
+        self
     }
 
-    pub fn set_render_receiver(&mut self, render_receiver: mpsc::Receiver<RenderCallback>) {
+    pub fn set_render_receiver(mut self, render_receiver: mpsc::Receiver<RenderCallback>) -> Self {
         self.render_receiver = Some(render_receiver);
+        self
     }
 
-    pub fn set_input_event_sender(&mut self, input_event_sender: mpsc::Sender<InputEvent>) {
+    pub fn set_input_event_sender(mut self, input_event_sender: mpsc::Sender<InputEvent>) -> Self {
         self.input_event_sender = Some(input_event_sender);
+        self
     }
 
-    pub fn set_input_event_receiver(&mut self, input_event_receiver: mpsc::Receiver<InputEvent>) {
+    pub fn set_input_event_receiver(
+        mut self,
+        input_event_receiver: mpsc::Receiver<InputEvent>,
+    ) -> Self {
         self.input_event_receiver = Some(input_event_receiver);
+        self
+    }
+
+    pub fn set_control_sender(mut self, control_sender: mpsc::Sender<ControlEvent>) -> Self {
+        self.control_sender = Some(control_sender);
+        self
+    }
+
+    pub fn set_control_receiver(mut self, control_receiver: mpsc::Receiver<ControlEvent>) -> Self {
+        self.control_receiver = Some(control_receiver);
+        self
     }
 
     pub fn render_sender_is_some(&self) -> bool {
@@ -64,6 +86,10 @@ impl Connection {
 
     pub fn input_event_receiver_is_some(&self) -> bool {
         self.input_event_receiver.is_some()
+    }
+
+    pub fn control_sender_is_some(&self) -> bool {
+        self.control_sender.is_some()
     }
 }
 
@@ -90,7 +116,13 @@ impl Connection {
                 ConnectionEvent::RenderCallback(render)
             }
 
-            Some(control) = self.control_receiver.recv() => {
+            Some(control) = async {
+                if let Some(receiver) = self.control_receiver.as_mut() {
+                    receiver.recv().await
+                } else {
+                    futures::future::pending().await
+                }
+            } => {
                 ConnectionEvent::ControlEvent(control)
             }
         }
@@ -113,7 +145,21 @@ impl Connection {
                     false
                 }
             }
-            ConnectionEvent::ControlEvent(_control_event) => false,
+            ConnectionEvent::ControlEvent(control_event) => {
+                if let Some(sender) = self.control_sender.as_mut() {
+                    match sender.send(control_event).await {
+                        Ok(_) => true,
+                        Err(e) => {
+                            async_log!(LogEntry::from(
+                                format!("Connection send control event error: {:?}", e).as_bytes()
+                            ));
+                            false
+                        }
+                    }
+                } else {
+                    false
+                }
+            }
             ConnectionEvent::RenderCallback(render_callback) => {
                 if let Some(sender) = self.render_sender.as_mut() {
                     match sender.send(render_callback).await {
@@ -194,7 +240,7 @@ pub trait Connected {
 }
 
 pub trait ConnectionBehaviour:
-    ControlEventHook + InputEventBehaviour + RenderBehaviour + Connected
+    ControlEventHook + InputEventBehaviour + RenderBehaviour + Connected + Quit
 {
     fn release(&mut self, event: ConnectionEvent) -> impl Future<Output = ()> {
         async {

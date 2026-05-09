@@ -1,4 +1,5 @@
 use ratatui::{
+    layout::Offset,
     style::Style,
     text::Text,
     widgets::{Block, Borders, Paragraph, Wrap},
@@ -6,49 +7,53 @@ use ratatui::{
 
 #[derive(Default)]
 pub struct TopState {
-    pub text: Option<Text<'static>>,
-    pub wrap: Option<Wrap>,
-    pub borders: Option<Borders>,
-    pub style: Option<Style>,
-    pub title: Option<&'static str>,
+    pub text: Text<'static>,
+    pub wrap: Wrap,
+    pub borders: Borders,
+    pub style: Style,
+    pub title: &'static str,
+    pub cursor_offset: Offset,
 }
 
 impl TopState {
     pub fn text(mut self, text: Text<'static>) -> Self {
-        self.text = Some(text);
+        self.text = text;
         self
     }
 
     pub fn wrap(mut self, wrap: Wrap) -> Self {
-        self.wrap = Some(wrap);
+        self.wrap = wrap;
         self
     }
 
     pub fn borders(mut self, borders: Borders) -> Self {
-        self.borders = Some(borders);
+        self.borders = borders;
         self
     }
 
     pub fn style(mut self, style: Style) -> Self {
-        self.style = Some(style);
+        self.style = style;
         self
     }
 
     pub fn title(mut self, title: &'static str) -> Self {
-        self.title = Some(title);
+        self.title = title;
+        self
+    }
+
+    pub fn cursor_offset(mut self, cursor_offset: Offset) -> Self {
+        self.cursor_offset = cursor_offset;
         self
     }
 }
 
 impl Into<Paragraph<'static>> for TopState {
     fn into(self) -> Paragraph<'static> {
-        Paragraph::new(self.text.unwrap())
-            .wrap(self.wrap.unwrap())
-            .block(
-                Block::default()
-                    .style(self.style.unwrap())
-                    .borders(self.borders.unwrap())
-                    .title(self.title.unwrap()),
-            )
+        Paragraph::new(self.text).wrap(self.wrap).block(
+            Block::default()
+                .style(self.style)
+                .borders(self.borders)
+                .title(self.title),
+        )
     }
 }

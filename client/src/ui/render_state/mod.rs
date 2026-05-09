@@ -13,7 +13,6 @@ pub struct RenderState {
     pub top_state: Option<TopState>,
     pub bottom_state: Option<BottomState>,
     pub layout: Option<Layout>,
-    pub cursor_position: Option<Position>,
 }
 
 impl RenderState {
@@ -21,14 +20,15 @@ impl RenderState {
         if let Some(layout) = self.layout {
             let chunks = layout.split(frame.area());
             if let Some(top_state) = self.top_state {
+                let offset = top_state.cursor_offset;
                 frame.render_widget(Paragraph::from(top_state.into()), chunks[0]);
+                frame.set_cursor_position(Position::new(chunks[0].x, chunks[0].y).offset(offset));
             }
             if let Some(bottom_state) = self.bottom_state {
+                let offset = bottom_state.cursor_offset;
                 frame.render_widget(Paragraph::from(bottom_state.into()), chunks[1]);
+                frame.set_cursor_position(Position::new(chunks[1].x, chunks[1].y).offset(offset));
             }
-        }
-        if let Some(cursor_position) = self.cursor_position {
-            frame.set_cursor_position(cursor_position);
         }
     }
 }
@@ -46,11 +46,6 @@ impl RenderState {
 
     pub fn layout(mut self, layout: Layout) -> Self {
         self.layout = Some(layout);
-        self
-    }
-
-    pub fn cursor_position(mut self, cursor_position: Position) -> Self {
-        self.cursor_position = Some(cursor_position);
         self
     }
 }

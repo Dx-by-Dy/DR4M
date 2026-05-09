@@ -1,5 +1,6 @@
 //pub mod app_backend;
 //pub mod chat_manager;
+pub mod commander;
 pub mod connection;
 pub mod controller;
 pub mod inputter;

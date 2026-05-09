@@ -1,4 +1,5 @@
 use ratatui::{
+    layout::Offset,
     style::Style,
     text::Text,
     widgets::{Block, Borders, Paragraph, Wrap},
@@ -11,6 +12,7 @@ pub struct BottomState {
     pub borders: Borders,
     pub style: Style,
     pub title: &'static str,
+    pub cursor_offset: Offset,
 }
 
 impl BottomState {
@@ -36,6 +38,11 @@ impl BottomState {
 
     pub fn title(mut self, title: &'static str) -> Self {
         self.title = title;
+        self
+    }
+
+    pub fn cursor_offset(mut self, cursor_offset: Offset) -> Self {
+        self.cursor_offset = cursor_offset;
         self
     }
 }

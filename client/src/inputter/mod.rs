@@ -2,16 +2,21 @@ pub mod input_event;
 
 use crate::{
     connection::{Connected, Connection, ConnectionBehaviour, ConnectionEvent},
-    controller::{component::Component, control_event::ControlEventHook},
+    controller::{
+        component::{Component, Quit},
+        control_event::ControlEventHook,
+    },
     inputter::input_event::{InputEvent, InputEventBehaviour},
     ui::render_callback::RenderBehaviour,
 };
 use crossterm::event::{Event, EventStream};
 use futures::StreamExt;
 use tokio::select;
+use tokio_util::sync::CancellationToken;
 
 pub struct Inputter {
     connection: Connection,
+    cancellation_token: CancellationToken,
 }
 
 impl Inputter {
@@ -33,7 +38,10 @@ impl Inputter {
 
 impl Component for Inputter {
     fn new(connection: Connection) -> Self {
-        Self { connection }
+        Self {
+            connection,
+            cancellation_token: CancellationToken::new(),
+        }
     }
 
     fn main_loop(mut self) -> impl Future<Output = ()> + Send + 'static {
@@ -47,6 +55,9 @@ impl Component for Inputter {
                     }
                     Some(Ok(event)) = event_stream.next() => {
                         self.handle_event(event).await;
+                    }
+                    _ = self.cancellation_token.cancelled() => {
+                        break;
                     }
                 }
             }
@@ -63,6 +74,12 @@ impl RenderBehaviour for Inputter {}
 impl Connected for Inputter {
     fn connection(&mut self) -> &mut Connection {
         &mut self.connection
+    }
+}
+
+impl Quit for Inputter {
+    fn cancellation_token(&self) -> &CancellationToken {
+        &self.cancellation_token
     }
 }
 
