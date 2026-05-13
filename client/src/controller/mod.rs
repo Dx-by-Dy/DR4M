@@ -6,24 +6,41 @@ use crate::{
     connection::{Connected, Connection, ConnectionBehaviour},
     controller::{
         component::{Component, Quit},
-        control_event::{ControlEvent, ControlEventHook},
+        control_event::{ControlEvent, ControlEventHook, ToComponentEvent, ToControllerEvent},
     },
     inputter::{Inputter, input_event::InputEventBehaviour},
     ui::{UI, render_callback::RenderBehaviour},
 };
-use std::collections::HashMap;
-use tokio::{select, sync::mpsc};
+use logger::{async_log, log_entry::LogEntry};
+use tokio::{
+    select,
+    sync::{mpsc, oneshot},
+};
 use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum RenderFocus {
+    Top,
+    Bottom,
+}
 
 pub struct Controller {
     connection: Connection,
-    control_channels: HashMap<String, mpsc::Sender<ControlEvent>>,
     cancellation_token: CancellationToken,
+
+    render_focus: RenderFocus,
+    top_render_queue: Vec<mpsc::Sender<ControlEvent>>,
+    top_render_queue_index: usize,
+    bottom_render_queue: Vec<mpsc::Sender<ControlEvent>>,
+    bottom_render_queue_index: usize,
+    input_event_queue: Vec<mpsc::Sender<ControlEvent>>,
+    input_event_queue_index: usize,
+    services: Vec<mpsc::Sender<ControlEvent>>,
 }
 
 impl Controller {
     pub fn new() -> Self {
-        let (controller_control_sender, controller_control_receiver) = mpsc::channel(1024);
+        let (control_sender, control_receiver) = mpsc::channel(1024);
         let (commander_control_sender, commander_control_receiver) = mpsc::channel(1024);
         let (inputter_control_sender, inputter_control_receiver) = mpsc::channel(1024);
         let (ui_control_sender, ui_control_receiver) = mpsc::channel(1024);
@@ -31,27 +48,22 @@ impl Controller {
         let (input_event_sender, input_event_receiver) = mpsc::channel(1024);
         let (render_event_sender, render_event_receiver) = mpsc::channel(1024);
 
-        let controller_connection =
-            Connection::new().set_control_receiver(controller_control_receiver);
+        let controller_connection = Connection::new().set_control_receiver(control_receiver);
 
         let commander_connection = Connection::new()
             .set_control_receiver(commander_control_receiver)
             .set_input_event_receiver(input_event_receiver)
             .set_render_sender(render_event_sender)
-            .set_control_sender(controller_control_sender);
+            .set_control_sender(control_sender.clone());
 
         let inputter_connection = Connection::new()
             .set_control_receiver(inputter_control_receiver)
-            .set_input_event_sender(input_event_sender);
+            .set_input_event_sender(input_event_sender)
+            .set_control_sender(control_sender);
 
         let ui_connection = Connection::new()
             .set_control_receiver(ui_control_receiver)
             .set_render_receiver(render_event_receiver);
-
-        let mut control_channels = HashMap::new();
-        control_channels.insert("commander".to_string(), commander_control_sender);
-        control_channels.insert("inputter".to_string(), inputter_control_sender);
-        control_channels.insert("ui".to_string(), ui_control_sender);
 
         Commander::start(commander_connection);
         Inputter::start(inputter_connection);
@@ -59,7 +71,14 @@ impl Controller {
 
         Self {
             connection: controller_connection,
-            control_channels,
+            render_focus: RenderFocus::Bottom,
+            top_render_queue: vec![commander_control_sender.clone()],
+            top_render_queue_index: 0,
+            bottom_render_queue: vec![commander_control_sender.clone()],
+            bottom_render_queue_index: 0,
+            input_event_queue: vec![commander_control_sender],
+            input_event_queue_index: 0,
+            services: vec![inputter_control_sender, ui_control_sender],
             cancellation_token: CancellationToken::new(),
         }
     }
@@ -89,9 +108,116 @@ impl Component for Controller {
 impl ConnectionBehaviour for Controller {}
 
 impl ControlEventHook for Controller {
+    fn to_controller_event_hook(
+        &mut self,
+        to_controller_event: ToControllerEvent,
+    ) -> impl Future<Output = ()> {
+        async move {
+            match to_controller_event {
+                ToControllerEvent::SwapRenderChannel => {
+                    let (sender_component, receiver_component) = match self.render_focus {
+                        RenderFocus::Top => (
+                            &self.top_render_queue[self.top_render_queue_index],
+                            &self.top_render_queue
+                                [(self.top_render_queue_index + 1) % self.top_render_queue.len()],
+                        ),
+                        RenderFocus::Bottom => (
+                            &self.bottom_render_queue[self.bottom_render_queue_index],
+                            &self.bottom_render_queue[(self.bottom_render_queue_index + 1)
+                                % self.bottom_render_queue.len()],
+                        ),
+                    };
+
+                    let (oneshot_sender, oneshot_receiver) = oneshot::channel();
+                    if let Err(e) = sender_component
+                        .send(ControlEvent::ToComponentEvent(
+                            ToComponentEvent::SendRenderChannel(oneshot_sender),
+                        ))
+                        .await
+                    {
+                        async_log!(LogEntry::from(
+                            format!("Controller send render channel error: {:?}", e).as_bytes()
+                        ));
+                        return;
+                    }
+                    if let Err(e) = receiver_component
+                        .send(ControlEvent::ToComponentEvent(
+                            ToComponentEvent::RecvRenderChannel(oneshot_receiver),
+                        ))
+                        .await
+                    {
+                        async_log!(LogEntry::from(
+                            format!("Controller recv render channel error: {:?}", e).as_bytes()
+                        ));
+                        return;
+                    }
+
+                    match self.render_focus {
+                        RenderFocus::Top => {
+                            self.top_render_queue_index =
+                                (self.top_render_queue_index + 1) % self.top_render_queue.len();
+                        }
+                        RenderFocus::Bottom => {
+                            self.bottom_render_queue_index = (self.bottom_render_queue_index + 1)
+                                % self.bottom_render_queue.len();
+                        }
+                    }
+                }
+                ToControllerEvent::SwapInputEventChannel => {
+                    let (sender_component, receiver_component) = (
+                        &self.input_event_queue[self.input_event_queue_index],
+                        &self.input_event_queue
+                            [(self.input_event_queue_index + 1) % self.input_event_queue.len()],
+                    );
+
+                    let (oneshot_sender, oneshot_receiver) = oneshot::channel();
+                    if let Err(e) = sender_component
+                        .send(ControlEvent::ToComponentEvent(
+                            ToComponentEvent::SendInputEventChannel(oneshot_sender),
+                        ))
+                        .await
+                    {
+                        async_log!(LogEntry::from(
+                            format!("Controller send input event channel error: {:?}", e)
+                                .as_bytes()
+                        ));
+                        return;
+                    }
+                    if let Err(e) = receiver_component
+                        .send(ControlEvent::ToComponentEvent(
+                            ToComponentEvent::RecvInputEventChannel(oneshot_receiver),
+                        ))
+                        .await
+                    {
+                        async_log!(LogEntry::from(
+                            format!("Controller recv input event channel error: {:?}", e)
+                                .as_bytes()
+                        ));
+                        return;
+                    }
+
+                    self.input_event_queue_index =
+                        (self.input_event_queue_index + 1) % self.input_event_queue.len();
+                }
+            }
+        }
+    }
+
     fn quit_hook(&mut self) -> impl Future<Output = ()> {
         async {
-            for (_, control_channel) in self.control_channels.iter() {
+            for control_channel in self.services.iter() {
+                let _ = control_channel.send(ControlEvent::Quit).await;
+            }
+
+            for control_channel in self.top_render_queue.iter() {
+                let _ = control_channel.send(ControlEvent::Quit).await;
+            }
+
+            for control_channel in self.bottom_render_queue.iter() {
+                let _ = control_channel.send(ControlEvent::Quit).await;
+            }
+
+            for control_channel in self.input_event_queue.iter() {
                 let _ = control_channel.send(ControlEvent::Quit).await;
             }
         }

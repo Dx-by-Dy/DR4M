@@ -254,3 +254,21 @@ pub trait ConnectionBehaviour:
         }
     }
 }
+
+impl From<ControlEvent> for ConnectionEvent {
+    fn from(control_event: ControlEvent) -> Self {
+        ConnectionEvent::ControlEvent(control_event)
+    }
+}
+
+impl From<RenderCallback> for ConnectionEvent {
+    fn from(render_callback: RenderCallback) -> Self {
+        ConnectionEvent::RenderCallback(render_callback)
+    }
+}
+
+impl From<InputEvent> for ConnectionEvent {
+    fn from(input_event: InputEvent) -> Self {
+        ConnectionEvent::InputEvent(input_event)
+    }
+}
