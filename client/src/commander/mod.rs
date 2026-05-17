@@ -7,7 +7,7 @@ use crate::{
     inputter::input_event::InputEventBehaviour,
     ui::{
         render_callback::{RenderBehaviour, RenderCallback},
-        render_state::{RenderState, bottom_state::BottomState},
+        render_state::{RenderState, bottom_state::BottomState, top_state::TopState},
     },
 };
 use crossterm::event::{KeyCode, KeyEvent};
@@ -19,6 +19,8 @@ use ratatui::{
 };
 use tokio::select;
 use tokio_util::sync::CancellationToken;
+
+static COMMANDER_INFO: &str = "Welcome to DR4M!\nPress Esc to quit.\nPress F1 to swap.";
 
 pub struct Commander {
     connection: Connection,
@@ -61,6 +63,17 @@ impl RenderBehaviour for Commander {
                     Direction::Vertical,
                     [Constraint::Min(1), Constraint::Length(3)],
                 ))
+                .top_state(
+                    TopState::default()
+                        .text(Text::from(COMMANDER_INFO))
+                        .style(match self.connection.render_sender_is_some() {
+                            true => Style::new(),
+                            false => Style::new().dark_gray(),
+                        })
+                        .borders(Borders::ALL)
+                        .wrap(Wrap { trim: true })
+                        .title("Commander"),
+                )
                 .bottom_state(
                     BottomState::default()
                         .text(Text::from(self.buffer.clone()))
@@ -115,6 +128,11 @@ impl Component for Commander {
 
     fn main_loop(mut self) -> impl Future<Output = ()> + Send + 'static {
         async move {
+            let render_state = self.get_render_state().await;
+            self.connection
+                .send(RenderCallback::RenderState(render_state).into())
+                .await;
+
             loop {
                 select! {
                     connection_event = self.connection.recv() => {

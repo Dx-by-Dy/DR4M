@@ -4,7 +4,7 @@ use crate::{
     connection::{Connected, Connection, ConnectionBehaviour, ConnectionEvent},
     controller::{
         component::{Component, Quit},
-        control_event::{ControlEvent, ControlEventHook},
+        control_event::{ControlEvent, ControlEventHook, ToControllerEvent},
     },
     inputter::input_event::{InputEvent, InputEventBehaviour},
     ui::render_callback::RenderBehaviour,
@@ -22,8 +22,15 @@ pub struct Inputter {
 impl Inputter {
     async fn handle_event(&mut self, event: Event) {
         if event == Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)) {
+            self.connection.send(ControlEvent::Quit.into()).await;
+            return;
+        }
+
+        if event == Event::Key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)) {
             self.connection
-                .send(ConnectionEvent::ControlEvent(ControlEvent::Quit))
+                .send(ConnectionEvent::ControlEvent(
+                    ControlEvent::ToControllerEvent(ToControllerEvent::Swap),
+                ))
                 .await;
             return;
         }
@@ -34,11 +41,11 @@ impl Inputter {
                     .send(ConnectionEvent::InputEvent(InputEvent::KeyEvent(key_event)))
                     .await;
             }
-            Event::FocusGained => {},
-            Event::FocusLost => {},
-            Event::Mouse(_) => todo!(),
-            Event::Paste(_) => todo!(),
-            Event::Resize(_, _) => todo!(),
+            Event::FocusGained => {}
+            Event::FocusLost => {}
+            Event::Mouse(_) => {}
+            Event::Paste(_) => {}
+            Event::Resize(_, _) => {}
         }
     }
 }

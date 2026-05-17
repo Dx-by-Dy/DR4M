@@ -1,5 +1,5 @@
 //pub mod app_backend;
-//pub mod chat_manager;
+pub mod chat;
 pub mod commander;
 pub mod connection;
 pub mod controller;
@@ -12,7 +12,9 @@ pub type Tx = futures::stream::SplitSink<
     tokio_tungstenite::tungstenite::Message,
 >;
 
-logger::LOGGER_INIT!(
-    logger::builder::Builder::<logger::log_entry::LogEntry>::new(),
-    logger::log_entry::LogEntry
-);
+pub static LOGGER_READER: tokio::sync::OnceCell<
+    logger::log_reader::LogReader<logger::log_entry::LogEntry>,
+> = tokio::sync::OnceCell::const_new();
+pub static LOGGER_WRITER: tokio::sync::OnceCell<
+    logger::log_writer::LogWriter<logger::log_entry::LogEntry>,
+> = tokio::sync::OnceCell::const_new();

@@ -135,9 +135,10 @@ impl Connection {
                     match sender.send(input_event).await {
                         Ok(_) => true,
                         Err(e) => {
-                            async_log!(LogEntry::from(
+                            _ = async_log!(LogEntry::from(
                                 format!("Connection send input event error: {:?}", e).as_bytes()
-                            ));
+                            ))
+                            .await;
                             false
                         }
                     }
@@ -150,9 +151,10 @@ impl Connection {
                     match sender.send(control_event).await {
                         Ok(_) => true,
                         Err(e) => {
-                            async_log!(LogEntry::from(
+                            _ = async_log!(LogEntry::from(
                                 format!("Connection send control event error: {:?}", e).as_bytes()
-                            ));
+                            ))
+                            .await;
                             false
                         }
                     }
@@ -165,9 +167,10 @@ impl Connection {
                     match sender.send(render_callback).await {
                         Ok(_) => true,
                         Err(_) => {
-                            async_log!(LogEntry::from(
+                            _ = async_log!(LogEntry::from(
                                 format!("Connection send render error").as_bytes()
-                            ));
+                            ))
+                            .await;
                             false
                         }
                     }
@@ -185,9 +188,10 @@ impl Connection {
         bridge: oneshot::Sender<mpsc::Sender<RenderCallback>>,
     ) {
         if let Err(e) = bridge.send(self.render_sender.take().unwrap()) {
-            async_log!(LogEntry::from(
+            _ = async_log!(LogEntry::from(
                 format!("Connection send error: {:?}", e).as_bytes()
-            ));
+            ))
+            .await;
         }
     }
 
@@ -200,9 +204,10 @@ impl Connection {
                 self.render_sender = Some(channel);
             }
             Err(e) => {
-                async_log!(LogEntry::from(
+                _ = async_log!(LogEntry::from(
                     format!("Connection recv error: {:?}", e).as_bytes()
-                ));
+                ))
+                .await;
             }
         }
     }
@@ -212,9 +217,10 @@ impl Connection {
         bridge: oneshot::Sender<mpsc::Receiver<InputEvent>>,
     ) {
         if let Err(e) = bridge.send(self.input_event_receiver.take().unwrap()) {
-            async_log!(LogEntry::from(
+            _ = async_log!(LogEntry::from(
                 format!("Connection send error: {:?}", e).as_bytes()
-            ));
+            ))
+            .await;
         }
     }
 
@@ -227,9 +233,10 @@ impl Connection {
                 self.input_event_receiver = Some(channel);
             }
             Err(e) => {
-                async_log!(LogEntry::from(
+                _ = async_log!(LogEntry::from(
                     format!("Connection recv error: {:?}", e).as_bytes()
-                ));
+                ))
+                .await;
             }
         }
     }

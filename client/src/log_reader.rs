@@ -10,8 +10,7 @@ use crate::{
         render_state::{RenderState, top_state::TopState},
     },
 };
-use crossterm::event::KeyEvent;
-use logger::{async_read_log, log_entry::LogEntry};
+use logger::{async_log, async_read_log, log_entry::LogEntry};
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::Style,
@@ -52,11 +51,7 @@ impl ControlEventHook for LogReader {
     }
 }
 
-impl InputEventBehaviour for LogReader {
-    fn key_event(&mut self, _key_event: KeyEvent) -> impl Future<Output = ()> {
-        async move { todo!() }
-    }
-}
+impl InputEventBehaviour for LogReader {}
 
 impl RenderBehaviour for LogReader {
     fn get_render_state(&mut self) -> impl Future<Output = RenderState> {
@@ -106,6 +101,13 @@ impl Component for LogReader {
 
     fn main_loop(mut self) -> impl Future<Output = ()> {
         async move {
+            _ = async_log!(LogEntry::from(format!("LogReader start").as_bytes())).await;
+
+            let render_state = self.get_render_state().await;
+            self.connection
+                .send(RenderCallback::RenderState(render_state).into())
+                .await;
+
             loop {
                 select! {
                     connection_event = self.connection.recv() => {

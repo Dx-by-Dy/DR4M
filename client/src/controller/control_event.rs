@@ -13,8 +13,7 @@ pub enum ToComponentEvent {
 }
 
 pub enum ToControllerEvent {
-    SwapRenderChannel,
-    SwapInputEventChannel,
+    Swap,
 }
 
 pub enum ControlEvent {

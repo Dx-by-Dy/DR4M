@@ -29,9 +29,10 @@ impl RenderBehaviour for UI {
     fn handle_render_state(&mut self, render_state: RenderState) -> impl Future<Output = ()> {
         async {
             if let Err(e) = self.terminal.draw(|frame| render_state.render_frame(frame)) {
-                async_log!(LogEntry::from(
+                _ = async_log!(LogEntry::from(
                     format!("UIManager update error: {:?}", e).as_bytes()
-                ));
+                ))
+                .await;
             }
         }
     }

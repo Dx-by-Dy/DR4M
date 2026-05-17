@@ -6,7 +6,11 @@ use crate::{
     logger::tasks::{spawn_buffer_task, spawn_reader_task, spawn_writer_task},
 };
 use std::fmt::Display;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::{
+    join,
+    sync::{broadcast, mpsc, oneshot},
+    task::JoinError,
+};
 
 pub struct Logger<T: LogEntryProtocol<T> + Display> {
     buffer_handler: tokio::task::JoinHandle<()>,
@@ -35,12 +39,18 @@ impl<T: LogEntryProtocol<T> + Display> Logger<T> {
             entry_type: std::marker::PhantomData,
         }
     }
-}
 
-impl<T: LogEntryProtocol<T> + Display> Drop for Logger<T> {
-    fn drop(&mut self) {
-        self.reader_handler.abort();
-        self.writer_handler.abort();
-        self.buffer_handler.abort();
+    pub async fn wait(
+        self,
+    ) -> (
+        Result<(), JoinError>,
+        Result<(), JoinError>,
+        Result<(), JoinError>,
+    ) {
+        join!(
+            self.buffer_handler,
+            self.writer_handler,
+            self.reader_handler
+        )
     }
 }
